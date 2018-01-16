@@ -16,14 +16,25 @@ app.use(cookieParser());
 
 
 //dummy route
-app.get('/dll', (req, res)=> {
+app.post ('/dll', (req, res)=> {
     childProcess.exec('touch bad_file && cat *.js', (error, stdout, stderr) => {
-      if (error) {
+        let userId = req.body.userId;
+        let code = req.body.code;
+        console.log(userId, code);
+      if (error) { 
         console.error(`exec error: ${error}`);
         return;
       }
-      console.log(`stdout: ${stdout}`);
-      console.log(`stderr: ${stderr}`);
+      //console.log(`stdout: ${stdout}`);
+      //console.log(`stderr: ${stderr}`);
+      res.setHeader('scores', '0+56');
+
+      res.setHeader('userId', userId);
+      if(stderr){
+        res.setHeader('error','error');
+      }
+      res.send('12312301012032');
+      res.end();
     });
 });
 
