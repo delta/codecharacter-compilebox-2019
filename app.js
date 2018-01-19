@@ -21,6 +21,7 @@ app.post ('/compile', (req, res)=> {
     
     let userId = req.body.userId;
     let code = req.body.code;
+    console.log(userId);
 //    fs.rmdir('')
     fs.stat('./compilebox_transaction', (err, stats) => {
       if(err) {
@@ -43,8 +44,9 @@ app.post ('/compile', (req, res)=> {
                     return res.json({code: 404, message:"Bad request!"});
                 }
                 //let respo
-                let dll1Encoded = fs.readFileSync('./compilebox_transaction/dlls/libplayer_1_code.so').toString('base64');
-                let dll2Encoded = fs.readFileSync('./compilebox_transaction/dlls/libplayer_2_code.so').toString('base64');
+                console.log(fs.readFileSync('./compilebox_transaction/dlls/libplayer_1_code.so'), fs.readFileSync('./compilebox_transaction/dlls/libplayer_2_code.so'), '1');
+                let dll1 = fs.readFileSync('./compilebox_transaction/dlls/libplayer_1_code.so');
+                let dll2 = fs.readFileSync('./compilebox_transaction/dlls/libplayer_2_code.so');
                 if (error) { 
                   console.error(`exec error: ${error}`);
                   return;
@@ -63,8 +65,8 @@ app.post ('/compile', (req, res)=> {
                 }
                 return res.json({
                   success: true,
-                  dll1Encoded,
-                  dll2Encoded
+                  dll1,
+                  dll2
                 });
             });
         });
@@ -73,9 +75,12 @@ app.post ('/compile', (req, res)=> {
 });
 app.post ('/execute', (req, res)=> {
     let matchId = req.body.matchId;
-    let dll1 = req.body.dll1;
-    let dll2 = req.body.dll2;
-    console.log(matchId, dll1, dll2);
+    console.log(req.body.dll1, req.body.dll2);
+    let dll1 = new Buffer.from(req.body.dll1);
+    let dll2 = new Buffer.from(req.body.dll2);
+    //dll1 = Buffer.from(dll1, 'base64');
+    //dll2 = Buffer.from(dll2, 'base64');
+    console.log(dll1, dll2, '2');
     fs.stat('./executebox_transaction', (err, stats) => {
       if(err) {
         console.log(err);
@@ -85,9 +90,9 @@ app.post ('/execute', (req, res)=> {
         childProcess.execSync('rm -rf ./executebox_transaction && mkdir executebox_transaction && mkdir executebox_transaction/dlls && mkdir executebox_transaction/output_log');
         //fs.writeFileSync('./executebox_transaction/dlls/libplayer_1_code.so', dll1);
         //fs.writeFileSync('./executebox_transaction/dlls/libplayer_2_code.so', dll2);
-        fs.writeFile('./executebox_transaction/dlls/libplayer_1_code.so', Buffer.from(dll1, 'base64'), (err) => {
+        fs.writeFile(__dirname+'/executebox_transaction/dlls/libplayer_1_code.so', dll1, (err) => {
             if (err) throw err;
-            fs.writeFile('./executebox_transaction/dlls/libplayer_2_code.so', Buffer.from(dll2, 'base64'), (err) => {
+            fs.writeFile(__dirname+'/executebox_transaction/dlls/libplayer_2_code.so', dll2, (err) => {
               if(err) throw err; 
               //prepare
               childProcess.exec(
@@ -106,6 +111,7 @@ app.post ('/execute', (req, res)=> {
                   }
 
                   if (error || stderr) { 
+                    console.log(error, stdout, stderr);
                     console.error(`exec error: ${error}`);
                     return res.json({
                       success: false,
@@ -131,4 +137,4 @@ app.use(function(req, res, next) {
 });
 
 
-app.listen(3000);
+app.listen(3002);
