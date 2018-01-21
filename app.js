@@ -1,13 +1,13 @@
-var express = require('express');
-var path = require('path');
-var favicon = require('static-favicon');
-var logger = require('morgan');
-var cookieParser = require('cookie-parser');
-var bodyParser = require('body-parser');
-var childProcess = require('child_process');
+const express = require('express');
+const path = require('path');
+const favicon = require('static-favicon');
+const logger = require('morgan');
+const cookieParser = require('cookie-parser');
+const bodyParser = require('body-parser');
+const childProcess = require('child_process');
 //impotrt from somewhere
 const secretString = "I_am_aw3sOme";
-var app = express();
+const app = express();
 const fs = require('fs');
 app.use(favicon());
 app.use(logger('dev'));
@@ -75,12 +75,10 @@ app.post ('/compile', (req, res)=> {
 });
 app.post ('/execute', (req, res)=> {
     let matchId = req.body.matchId;
-    console.log(req.body.dll1, req.body.dll2);
     let dll1 = new Buffer.from(req.body.dll1);
     let dll2 = new Buffer.from(req.body.dll2);
     //dll1 = Buffer.from(dll1, 'base64');
     //dll2 = Buffer.from(dll2, 'base64');
-    console.log(dll1, dll2, '2');
     fs.stat('./executebox_transaction', (err, stats) => {
       if(err) {
         console.log(err);
@@ -100,7 +98,7 @@ app.post ('/execute', (req, res)=> {
                   docker run -v $(pwd)/executebox_transaction/dlls:/root/input_libs -v $(pwd)/executebox_transaction/output_log:/root/output_log -t deltanitt/codecharacter-runner
                 `, 
                 (error, stdout, stderr) => {
-                  let log = fs.readFileSync('executebox_transaction/output_log/game.log').toString('base64');
+                  let log = fs.readFileSync('executebox_transaction/output_log/game.log');
 
                   if(stdout.toLowerCase().indexOf('error') != -1){
                     return res.json({
@@ -130,7 +128,7 @@ app.post ('/execute', (req, res)=> {
 
 /// catch 404 and forwarding to error handler
 app.use(function(req, res, next) {
-    var err = new Error('Not Found');
+    let err = new Error('Not Found');
     err.status = 404;
     console.log(err);
     next(err);
