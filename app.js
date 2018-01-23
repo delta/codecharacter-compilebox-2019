@@ -6,6 +6,8 @@ const cookieParser = require('cookie-parser');
 const bodyParser = require('body-parser');
 const childProcess = require('child_process');
 //impotrt from somewhere
+const EloRank = require('elo-rank');
+const elo = new EloRank(18);
 const secretString = "I_am_aw3sOme";
 const app = express();
 const fs = require('fs');
@@ -99,7 +101,24 @@ app.post ('/execute', (req, res)=> {
                 `, 
                 (error, stdout, stderr) => {
                   let log = fs.readFileSync('executebox_transaction/output_log/game.log');
-
+                  let score1 = Math.floor(Math.random()*100);
+                  let score2 = Math.floor(Math.random()*100);
+                  let expec1 = elo.getExpected(score1, score2);
+                  let expec2 = elo.getExpected(score2, score1);
+                  let stdoutArray = stdout.split('\n');
+                  let results = stdoutArray[stdoutArray.length-2];
+                  results = results.split(' ').slice(1);
+                  let player1ExitStatus = results[1];
+                  let player2ExitStatus = results[3];
+                  let player1Score = results[0];
+                  let player2Score = results[2];
+                  console.log(match2ResultStatus === 'UNDEFINED');
+                  match2ResultStatus = match2ResultStatus.replace('\r', '');
+                  console.log(match2ResultStatus === 'UNDEFINED', match2ResultStatus);
+                  //console.log(score1, score2);
+                  score1 = elo.updateRating(expec1, 1, score1);
+                  score2 = elo.updateRating(expec2, 0, score2);
+                  console.log(score1, score2);
                   if(stdout.toLowerCase().indexOf('error') != -1){
                     return res.json({
                       success: false,
