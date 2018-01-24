@@ -6,18 +6,21 @@ const cookieParser = require('cookie-parser');
 const bodyParser = require('body-parser');
 const childProcess = require('child_process');
 //impotrt from somewhere
-const EloRank = require('elo-rank');
-const elo = new EloRank(18);
+const zlib = require('zlib');
 const secretString = "I_am_aw3sOme";
 const app = express();
 const fs = require('fs');
+const pako = require('pako');
 app.use(favicon());
 app.use(logger('dev'));
 app.use(bodyParser.json({limit:'50mb'}));
 app.use(bodyParser.urlencoded({limit:'50mb'}));
 app.use(cookieParser());
 
-
+app.post('/dummt', function(req, res) {
+  console.log(req.body);
+  res.end('hey, thanks');
+})
 //dummy route
 app.post ('/compile', (req, res)=> {
     
@@ -31,9 +34,9 @@ app.post ('/compile', (req, res)=> {
         return res.json({success: false});
       }
       if(stats.isDirectory()){
-        childProcess.execSync('rm -rf ./compilebox_transaction && mkdir compilebox_transaction && mkdir compilebox_transaction/dlls && mkdir compilebox_transaction/source');
-
-        fs.writeFile('./compilebox_transaction/source/player_code.cpp', code, (err) => {
+        childProcess.exec('rm -rf ./compilebox_transaction && mkdir compilebox_transaction && mkdir compilebox_transaction/dlls && mkdir compilebox_transaction/source', (err, stdout, stderr) => {
+          //console.log(err, stdout, stderr, 'lpg');
+          fs.writeFile('./compilebox_transaction/source/player_code.cpp', code, (err) => {
             if (err) throw err;
             //prepare
             childProcess.exec(
@@ -46,9 +49,9 @@ app.post ('/compile', (req, res)=> {
                     return res.json({code: 404, message:"Bad request!"});
                 }
                 //let respo
-                console.log(fs.readFileSync('./compilebox_transaction/dlls/libplayer_1_code.so'), fs.readFileSync('./compilebox_transaction/dlls/libplayer_2_code.so'), '1');
                 let dll1 = fs.readFileSync('./compilebox_transaction/dlls/libplayer_1_code.so');
                 let dll2 = fs.readFileSync('./compilebox_transaction/dlls/libplayer_2_code.so');
+                //console.log(dll1.length, dll1_decompressed.length);
                 if (error) { 
                   console.error(`exec error: ${error}`);
                   return;
@@ -72,6 +75,9 @@ app.post ('/compile', (req, res)=> {
                 });
             });
         });
+        });
+
+        
       }
     })
 });
@@ -101,24 +107,19 @@ app.post ('/execute', (req, res)=> {
                 `, 
                 (error, stdout, stderr) => {
                   let log = fs.readFileSync('executebox_transaction/output_log/game.log');
-                  let score1 = Math.floor(Math.random()*100);
-                  let score2 = Math.floor(Math.random()*100);
-                  let expec1 = elo.getExpected(score1, score2);
-                  let expec2 = elo.getExpected(score2, score1);
                   let stdoutArray = stdout.split('\n');
                   let results = stdoutArray[stdoutArray.length-2];
-                  results = results.split(' ').slice(1);
-                  let player1ExitStatus = results[1];
-                  let player2ExitStatus = results[3];
-                  let player1Score = results[0];
-                  let player2Score = results[2];
-                  console.log(match2ResultStatus === 'UNDEFINED');
-                  match2ResultStatus = match2ResultStatus.replace('\r', '');
-                  console.log(match2ResultStatus === 'UNDEFINED', match2ResultStatus);
+                  console.log(results);
+
+                  let player1Log = fs.readFileSync('./executebox_transaction/output_log/player_1.dlog');
+                  let player2Log = fs.readFileSync('./executebox_transaction/output_log/player_2.dlog');
+                  let player1LogCompressed = zlib.gzipSync(player1Log);
+                  let player2LogCompressed = zlib.gzipSync(player2Log);
+                  //let dll_compressed2 = zlib.gzipSync(dll2);
+                  //console.log(player1Log.length, player1LogCompressed.length, 'hey');
+                  //let dll1_decompressed = zlib.unzipSync(player1LogCompressed);
+                  //console.log(dll1_decompressed.length);
                   //console.log(score1, score2);
-                  score1 = elo.updateRating(expec1, 1, score1);
-                  score2 = elo.updateRating(expec2, 0, score2);
-                  console.log(score1, score2);
                   if(stdout.toLowerCase().indexOf('error') != -1){
                     return res.json({
                       success: false,
@@ -137,7 +138,7 @@ app.post ('/execute', (req, res)=> {
                     });
                   }
 
-                  res.json({success: true, log: log, matchId});
+                  res.json({success: true, log: log, matchId, results, player1LogCompressed, player2LogCompressed});
               });
             })
         });
