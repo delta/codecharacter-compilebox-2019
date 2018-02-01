@@ -7,7 +7,10 @@ const bodyParser = require('body-parser');
 const childProcess = require('child_process');
 //impotrt from somewhere
 const zlib = require('zlib');
-const secretString = "I_am_aw3sOme";
+
+const secretKey = require('./config.js').configKey;
+const appPort = require('./config.js').port;
+
 const app = express();
 const fs = require('fs');
 const pako = require('pako');
@@ -45,7 +48,7 @@ app.post ('/compile', (req, res)=> {
               `, 
               (error, stdout, stderr) => {
                 console.log(error, stderr, stdout);
-                if(req.body.secretString != "I_am_aw3sOme"){
+                if(req.body.secretString != secretKey){
                     return res.json({code: 404, message:"Bad request!"});
                 }
                 //let respo
@@ -155,4 +158,4 @@ app.use(function(req, res, next) {
 });
 
 
-app.listen(3002);
+app.listen(appPort);
