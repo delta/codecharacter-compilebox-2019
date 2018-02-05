@@ -49,7 +49,7 @@ app.post ('/compile', (req, res)=> {
                     docker run -v $(pwd)/compilebox_transaction/dlls:/root/output_libs -v $(pwd)/compilebox_transaction/source:/root/codecharacter/src/player_code/src -t deltanitt/codecharacter-compiler:latest
                   `,
                   (error, stdout, stderr) => {
-                    console.log(error, stderr, stdout);
+                    console.log(stdout, stderr);
                     if(req.body.secretString != secretKey){
                         return res.json({code: 404, message:"Bad request!"});
                     }
@@ -67,7 +67,6 @@ app.post ('/compile', (req, res)=> {
 
                     res.setHeader('user_id', userId);
                     stdout = stdout.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '')
-                    console.log(stdout);
                     if(stdout.toLowerCase().indexOf('error') != -1){
                       return res.json({
                         success: false,
@@ -116,20 +115,19 @@ app.post ('/execute', (req, res)=> {
                                 docker run -v $(pwd)/executebox_transaction/dlls:/root/input_libs -v $(pwd)/executebox_transaction/output_log:/root/output_log -t deltanitt/codecharacter-runner:latest
                                 `,
                                 (error, stdout, stderr) => {
-                                    let log = fs.readFileSync('executebox_transaction/output_log/game.log');
+                                    console.log(error, stdout, stderr);
                                     let stdoutArray = stdout.split('\n');
                                     let results = stdoutArray[stdoutArray.length-2];
-                                    //console.log(results);
-
-                                    let player1Log = fs.readFileSync('./executebox_transaction/output_log/player_1.dlog');
-                                    let player2Log = fs.readFileSync('./executebox_transaction/output_log/player_2.dlog');
-                                    let player1LogCompressed = zlib.gzipSync(player1Log);
-                                    let player2LogCompressed = zlib.gzipSync(player2Log);
-                                    //let dll_compressed2 = zlib.gzipSync(dll2);
-                                    //console.log(player1Log.length, player1LogCompressed.length, 'hey');
-                                    //let dll1_decompressed = zlib.unzipSync(player1LogCompressed);
-                                    //console.log(dll1_decompressed.length);
-                                    //console.log(score1, score2);
+                                    if(results.indexOf("UNDEFINED") != -1){
+                                        return res.json({
+                                            success: true,
+                                            log:'', 
+                                            matchId, 
+                                            results, 
+                                            player1LogCompressed:'', 
+                                            player2LogCompressed:''
+                                        })
+                                    }
                                     if(stdout.toLowerCase().indexOf('error') != -1){
                                         return res.json({
                                             success: false,
@@ -148,7 +146,21 @@ app.post ('/execute', (req, res)=> {
                                         });
                                     }
 
-                                    res.json({success: true, log: log, matchId, results, player1LogCompressed, player2LogCompressed});
+                                    let log = fs.readFileSync('executebox_transaction/output_log/game.log');
+                                    let logCompressed = zlib.gzipSync(log);
+                                    //console.log(results);
+
+                                    let player1Log = fs.readFileSync('./executebox_transaction/output_log/player_1.dlog');
+                                    let player2Log = fs.readFileSync('./executebox_transaction/output_log/player_2.dlog');
+                                    let player1LogCompressed = zlib.gzipSync(player1Log);
+                                    let player2LogCompressed = zlib.gzipSync(player2Log);
+                                    //let dll_compressed2 = zlib.gzipSync(dll2);
+                                    //console.log(player1Log.length, player1LogCompressed.length, 'hey');
+                                    //let dll1_decompressed = zlib.unzipSync(player1LogCompressed);
+                                    //console.log(dll1_decompressed.length);
+                                    //console.log(score1, score2);
+
+                                    res.json({success: true, log: logCompressed, matchId, results, player1LogCompressed, player2LogCompressed});
                                 });
                     })
                 });
