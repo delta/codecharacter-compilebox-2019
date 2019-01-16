@@ -1,183 +1,241 @@
 const express = require('express');
-const path = require('path');
-const favicon = require('static-favicon');
 const logger = require('morgan');
 const cookieParser = require('cookie-parser');
 const bodyParser = require('body-parser');
 const childProcess = require('child_process');
-//impotrt from somewhere
 const zlib = require('zlib');
+const fs = require('fs');
 
+// Init Config Constants
 const secretKey = require('./config.js').configKey;
 const appPort = require('./config.js').port;
 
+// Init App
 const app = express();
-const fs = require('fs');
-const pako = require('pako');
-app.use(favicon());
 app.use(logger('dev'));
-app.use(bodyParser.json({limit:'50mb'}));
-app.use(bodyParser.urlencoded({limit:'50mb'}));
+app.use(bodyParser.json({ limit: '50mb' }));
+app.use(bodyParser.urlencoded({ limit: '50mb' }));
 app.use(cookieParser());
 
-app.post('/dummt', function(req, res) {
-  //console.log(req.body);
-  res.end('hey, thanks');
-})
-//dummy route
-app.post ('/compile', (req, res)=> {
+// Constants
+const COMPILE_DIRECTORY = 'compilebox_transaction';
+const EXECUTE_DIRECTORY = 'executebox_transaction';
+const PLAYER_CODE_DIRECTORY = '/root/codecharacter/src/player_code/src';
+const COMPILER_IMAGE = 'deltanitt/codecharacter-compiler:latest';
+const RUNNER_IMAGE = 'deltanitt/codecharacter-runner:latest';
 
-    let userId = req.body.user_id;
-    let code = req.body.code;
-    //console.log(userId);
-//    fs.rmdir('')
-    try{
-        fs.stat('./compilebox_transaction', (err, stats) => {
-          if(err) {
-            console.log(err);
-            //console.log(err);
-            return res.json({success: false});
-          }
-          if(stats.isDirectory()){
-            childProcess.exec('rm -rf ./compilebox_transaction && mkdir compilebox_transaction && mkdir compilebox_transaction/dlls && mkdir compilebox_transaction/source', (err, stdout, stderr) => {
-              //console.log(err, stdout, stderr, 'lpg');
-              fs.writeFile('./compilebox_transaction/source/player_code.cpp', code, (err) => {
-                if (err) throw err;
-                //prepare
-                childProcess.exec(
-                  `
-                    docker run -v $(pwd)/compilebox_transaction/dlls:/root/output_libs -v $(pwd)/compilebox_transaction/source:/root/codecharacter/src/player_code/src -t deltanitt/codecharacter-compiler:latest
-                  `,
-                  (error, stdout, stderr) => {
-                    console.log(stdout, stderr);
-                    if(req.body.secretString != secretKey){
-                        return res.json({code: 404, message:"Bad request!"});
-                    }
-                    //let respo
-                    let dll1 = fs.readFileSync('./compilebox_transaction/dlls/libplayer_1_code.so');
-                    let dll2 = fs.readFileSync('./compilebox_transaction/dlls/libplayer_2_code.so');
-                    //console.log(dll1.length, dll1_decompressed.length);
-                    if (error) {
-                      console.error(`exec error: ${error}`);
-                      return;
-                    }
-                    //console.log(`stdout: ${stdout}`);
-                    //console.log(`stderr: ${stderr}`);
-                    res.setHeader('scores', '0+56');
+// Helper function to strip ANSI characters from console output
+const stripAnsi = input => input.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
 
-                    res.setHeader('user_id', userId);
-                    stdout = stdout.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '')
-                    if(stdout.toLowerCase().indexOf('error') != -1){
-                      return res.json({
-                        success: false,
-                        error: stdout
-                      });
-                    }
-                    return res.json({
-                      success: true,
-                      dll1,
-                      dll2
-                    });
-                });
+// Compile Route
+app.post('/compile', (req, res) => {
+  const { code, secretString } = req.body;
+
+  if (secretString !== secretKey) {
+    return res.json({
+      success: false,
+      message: 'Unauthorized!',
+    });
+  }
+
+  try {
+    // Check if the container directory exists
+    fs.stat(`./${COMPILE_DIRECTORY}`, (directoryCheckError, stats) => {
+      if (directoryCheckError) {
+        console.log(directoryCheckError);
+        return res.json({
+          success: false,
+          error: directoryCheckError,
+        });
+      }
+
+      // If it does, check if it's a valid directory
+      if (stats.isDirectory()) {
+        // Remove anything previously contained in the directory and create new subdirectories
+        childProcess.exec(`
+            rm -rf ./${COMPILE_DIRECTORY} && \
+            mkdir -p ${COMPILE_DIRECTORY}/dlls && \
+            mkdir -p ${COMPILE_DIRECTORY}/source`,
+        (directoryCreationError) => {
+          if (directoryCreationError) {
+            console.log(directoryCreationError);
+            return res.json({
+              success: false,
+              error: directoryCreationError,
             });
-            });
-
-
           }
-        })
-    }catch(e){
-        console.log(e, 'Please make compilebox directory manually!');
-    }
-});
-app.post ('/execute', (req, res)=> {
-    let matchId = req.body.matchId;
-    let dll1 = new Buffer.from(req.body.dll1);
-    let dll2 = new Buffer.from(req.body.dll2);
-    //dll1 = Buffer.from(dll1, 'base64');
-    //dll2 = Buffer.from(dll2, 'base64');
-    try{
-        fs.stat('./executebox_transaction', (err, stats) => {
-            if(err) {
-                //console.log(err);
-                return res.json({success: false});
+
+          // Write the player code into a file to ready it for compilation
+          fs.writeFile(`./${COMPILE_DIRECTORY}/source/player_code.cpp`, code, (playerCodeWriteError) => {
+            if (playerCodeWriteError) {
+              console.log(playerCodeWriteError);
+              return res.json({
+                success: false,
+                error: playerCodeWriteError,
+              });
             }
-            if(stats.isDirectory()){
-                childProcess.execSync('rm -rf ./executebox_transaction && mkdir executebox_transaction && mkdir executebox_transaction/dlls && mkdir executebox_transaction/output_log');
-                //fs.writeFileSync('./executebox_transaction/dlls/libplayer_1_code.so', dll1);
-                //fs.writeFileSync('./executebox_transaction/dlls/libplayer_2_code.so', dll2);
-                fs.writeFile(__dirname+'/executebox_transaction/dlls/libplayer_1_code.so', dll1, (err) => {
-                    if (err) throw err;
-                    fs.writeFile(__dirname+'/executebox_transaction/dlls/libplayer_2_code.so', dll2, (err) => {
-                        if(err) throw err;
-                        //prepare
-                        childProcess.exec(
-                                `
-                                docker run -v $(pwd)/executebox_transaction/dlls:/root/input_libs -v $(pwd)/executebox_transaction/output_log:/root/output_log -t deltanitt/codecharacter-runner:latest
-                                `,
-                                (error, stdout, stderr) => {
-                                    console.log(error, stdout, stderr);
-                                    let stdoutArray = stdout.split('\n');
-                                    let results = stdoutArray[stdoutArray.length-2];
-                                    if(results.indexOf("UNDEFINED") != -1){
-                                        return res.json({
-                                            success: true,
-                                            log:'', 
-                                            matchId, 
-                                            results, 
-                                            player1LogCompressed:'', 
-                                            player2LogCompressed:''
-                                        })
-                                    }
-                                    if(stdout.toLowerCase().indexOf('error') != -1){
-                                        return res.json({
-                                            success: false,
-                                            error: stdout.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, ''),
-                                            matchId
-                                        });
-                                    }
 
-                                    if (error || stderr) {
-                                        //console.log(error, stdout, stderr);
-                                        console.error(`exec error: ${error}`);
-                                        return res.json({
-                                            success: false,
-                                            error: stdout.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, ''),
-                                            matchId
-                                        });
-                                    }
+            // Launch the compile container, passing the directories as params
+            // Once compile is done, the output libs are mapped back into the libs directory
+            childProcess.exec(`
+                    docker run \
+                    -v $(pwd)/${COMPILE_DIRECTORY}/dlls:/root/output_libs \
+                    -v $(pwd)/${COMPILE_DIRECTORY}/source:${PLAYER_CODE_DIRECTORY} \
+                    -t ${COMPILER_IMAGE}`,
+            (compilerError, stdout, stderr) => {
+              // Log outputs for visibility
+              console.log(stdout, stderr);
 
-                                    let log = fs.readFileSync('executebox_transaction/output_log/game.log');
-                                    let logCompressed = zlib.gzipSync(log);
-                                    //console.log(results);
+              // Handle compilation failure
+              if (compilerError) {
+                console.error(compilerError);
+                return compilerError;
+              }
 
-                                    let player1Log = fs.readFileSync('./executebox_transaction/output_log/player_1.dlog');
-                                    let player2Log = fs.readFileSync('./executebox_transaction/output_log/player_2.dlog');
-                                    let player1LogCompressed = zlib.gzipSync(player1Log);
-                                    let player2LogCompressed = zlib.gzipSync(player2Log);
-                                    //let dll_compressed2 = zlib.gzipSync(dll2);
-                                    //console.log(player1Log.length, player1LogCompressed.length, 'hey');
-                                    //let dll1_decompressed = zlib.unzipSync(player1LogCompressed);
-                                    //console.log(dll1_decompressed.length);
-                                    //console.log(score1, score2);
-
-                                    res.json({success: true, log: logCompressed, matchId, results, player1LogCompressed, player2LogCompressed});
-                                });
-                    })
+              // If there was an error in compilation
+              if (stdout.toLowerCase().indexOf('error') !== -1) {
+                // Strip ANSI special color characters in compiler output
+                const strippedStdout = stripAnsi(stdout);
+                return res.json({
+                  success: false,
+                  error: strippedStdout,
                 });
-            }
-        })
-    }catch(e){
-        console.log(e, "Please make executebox directory manually!");
-    }
+              }
+
+              // Read the output DLLs
+              const dll1 = fs.readFileSync(`./${COMPILE_DIRECTORY}/dlls/libplayer_1_code.so`);
+              const dll2 = fs.readFileSync(`./${COMPILE_DIRECTORY}/dlls/libplayer_2_code.so`);
+
+              // Return response
+              return res.json({
+                success: true,
+                dll1,
+                dll2,
+              });
+            });
+          });
+        });
+      }
+    });
+  } catch (e) {
+    console.log(e, 'Please make compilebox directory manually!');
+  }
 });
 
-/// catch 404 and forwarding to error handler
-app.use(function(req, res, next) {
-    let err = new Error('Not Found');
-    err.status = 404;
-    //console.log(err);
-    next(err);
+// Execute Route
+app.post('/execute', (req, res) => {
+  const { matchId } = req.body;
+  let { dll1, dll2 } = req.body;
+
+  // Read DLL data into Buffer objects
+  dll1 = new Buffer.from(req.body.dll1);
+  dll2 = new Buffer.from(req.body.dll2);
+
+  try {
+    // Check if the container directory exists
+    fs.stat(`./${EXECUTE_DIRECTORY}`, (directoryCheckError, stats) => {
+      if (directoryCheckError) {
+        return res.json({
+          success: false,
+          error: directoryCheckError,
+        });
+      }
+
+      // Check if it's a valid directory
+      if (stats.isDirectory()) {
+        // Remove anything previously contained in the directory and create new subdirectories
+        childProcess.execSync(`
+          rm -rf ./${EXECUTE_DIRECTORY} && \
+          mkdir -p ${EXECUTE_DIRECTORY}/dlls && \
+          mkdir -p ${EXECUTE_DIRECTORY}/output_log`);
+
+        // Write input DLLs to file
+        fs.writeFile(`${__dirname}/${EXECUTE_DIRECTORY}/dlls/libplayer_1_code.so`, dll1, (dll1WriteError) => {
+          if (dll1WriteError) throw dll1WriteError;
+          fs.writeFile(`${__dirname}/${EXECUTE_DIRECTORY}/dlls/libplayer_2_code.so`, dll2, (dll2WriteError) => {
+            if (dll2WriteError) throw dll2WriteError;
+
+            // Launch the execute container, and pass output directories as parameters
+            childProcess.exec(`
+              docker run -v $(pwd)/${EXECUTE_DIRECTORY}/dlls:/root/input_libs \
+              -v $(pwd)/${EXECUTE_DIRECTORY}/output_log:/root/output_log \
+              -t ${RUNNER_IMAGE}`,
+            (executionError, stdout, stderr) => {
+              // Log output for visibility
+              console.log(executionError, stdout, stderr);
+
+              // If there was a visible error during runtime
+              if (stdout.toLowerCase().indexOf('error') !== -1) {
+                return res.json({
+                  success: false,
+                  error: stripAnsi(stdout),
+                  matchId,
+                });
+              }
+
+              // If some other runtime error occured
+              if (executionError || stderr) {
+                console.error(executionError);
+                return res.json({
+                  success: false,
+                  error: stripAnsi(stdout),
+                  matchId,
+                });
+              }
+
+              // Get the game scores from the end of stdout
+              const stdoutArray = stdout.split('\n');
+              const results = stdoutArray[stdoutArray.length - 2];
+
+              // If the game ended with an UNDEFINED status, return blank
+              if (results.indexOf('UNDEFINED') !== -1) {
+                return res.json({
+                  success: true,
+                  log: '',
+                  matchId,
+                  results,
+                  player1LogCompressed: '',
+                  player2LogCompressed: '',
+                });
+              }
+
+              // Else, we write the game log to file, and compress
+              const log = fs.readFileSync(`${EXECUTE_DIRECTORY}/output_log/game.log`);
+              const logCompressed = zlib.gzipSync(log);
+
+              // Write player debug logs to file, and compress
+              const player1Log = fs.readFileSync(`./${EXECUTE_DIRECTORY}/output_log/player_1.dlog`);
+              const player2Log = fs.readFileSync(`./${EXECUTE_DIRECTORY}/output_log/player_2.dlog`);
+              const player1LogCompressed = zlib.gzipSync(player1Log);
+              const player2LogCompressed = zlib.gzipSync(player2Log);
+
+              // Return response with logs and results
+              res.json({
+                success: true,
+                log: logCompressed,
+                matchId,
+                results,
+                player1LogCompressed,
+                player2LogCompressed,
+              });
+            });
+          });
+        });
+      }
+    });
+  } catch (e) {
+    console.error(e, 'Please create the executebox directory!');
+    return e;
+  }
 });
 
+// 404 Catch-all
+app.use((req, res, next) => {
+  const err = new Error('Not Found');
+  err.status = 404;
+  next(err);
+});
 
+// Start server
 app.listen(appPort);
+console.log('Server Ready...');
