@@ -34,10 +34,20 @@ const parseResultsFromString = (resultsString) => {
   const resultsItems = resultsString.split(' ');
 
   // Destructure results string
-  const [key, player1Score, player1Status, player2Score, player2Status] = resultsItems;
+  const [
+    key,
+    winner,
+    winType,
+    player1Score,
+    player1Status,
+    player2Score,
+    player2Status,
+  ] = resultsItems;
 
   return {
     key,
+    winner,
+    winType,
     scores: [
       {
         score: parseInt(player1Score),
@@ -98,13 +108,16 @@ app.post('/compile', async (req, res) => {
       -v $(pwd)/${COMPILE_DIRECTORY}/source:${PLAYER_CODE_DIRECTORY} \
       -t ${COMPILER_IMAGE}`);
 
+    // Strip ANSI special color characters in compiler output
+    const strippedStdout = stripAnsi(stdout);
+    const strippedStderr = stripAnsi(stderr);
+
     // Log outputs for visibility
-    console.log(stdout, stderr);
+    console.log(strippedStdout, strippedStderr);
 
     // If there was an error in compilation
-    if (stdout.toLowerCase().indexOf('error:') !== -1) {
-      // Strip ANSI special color characters in compiler output
-      const strippedStdout = stripAnsi(stdout);
+    if (strippedStdout.toLowerCase().indexOf('error:') !== -1
+     || strippedStdout.toLowerCase().indexOf('errors') !== -1) {
       return res.json({
         success: false,
         error: strippedStdout,
