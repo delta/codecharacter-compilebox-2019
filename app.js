@@ -20,8 +20,10 @@ app.use(bodyParser.urlencoded({ limit: '50mb' }));
 app.use(cookieParser());
 
 // Constants
-const COMPILE_DIRECTORY = 'compilebox_transaction';
-const EXECUTE_DIRECTORY = 'executebox_transaction';
+const COMPILE_DIRECTORY_BASE = 'compileboxes';
+const EXECUTE_DIRECTORY_BASE = 'executeboxes';
+const COMPILE_DIRECTORY_PREFIX = `${COMPILE_DIRECTORY_BASE}/compile_`;
+const EXECUTE_DIRECTORY_PREFIX = `${EXECUTE_DIRECTORY_BASE}/execute_`;
 const PLAYER_CODE_DIRECTORY = '/root/codecharacter/src/player_code/src';
 const COMPILER_IMAGE = 'deltanitt/codecharacter-compiler-2019:latest';
 const RUNNER_IMAGE = 'deltanitt/codecharacter-runner-2019:latest';
@@ -29,8 +31,20 @@ const RUNNER_IMAGE = 'deltanitt/codecharacter-runner-2019:latest';
 // Helper function to strip ANSI characters from console output
 const stripAnsi = input => input.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
 
+// Maintains a count of how many requests are currently being served
+// Note that this is obviously volatile and vanishes when the process
+// is stopped. It is NOT persisted
+//
+// Docker containers that had been spawned when the app crashed will
+// either die or live out their life and eventually stop.
+let requestCount = 0;
+
+// The maximum number of concurrent requests to handle
+const maxRequests = 2;
+
 // Helper function to parse results from the result line output of the simulator
 const parseResultsFromString = (resultsString) => {
+
   const resultsItems = resultsString.split(' ');
 
   // Destructure results string
@@ -67,12 +81,36 @@ const writeFileAsync = util.promisify(fs.writeFile);
 const statFileAsync = util.promisify(fs.stat);
 const execChildProcessAsync = util.promisify(childProcess.exec);
 
+// Helper method to end the game and decrement the request count
+const endGame = async (transactionDirectory) => {
+  requestCount -= 1;
+  if ((await statFileAsync(`${transactionDirectory}`)).isDirectory()) {
+    await execChildProcessAsync(`rm -rf ${transactionDirectory}`);
+  }
+};
+
 // Compile Route
 app.post('/compile', async (req, res) => {
+  // If we're handling too many requests, stop
+  if (requestCount === maxRequests) {
+    return res.json({
+      success: false,
+      error: 'Box is busy... Please wait!',
+    });
+  }
+
+  // Increment the requestCount
+  requestCount += 1;
+
+  // Read input parameters
   const { code, secretString } = req.body;
+
+  // Generate a new directory name for this transaction
+  const compileDirectory = COMPILE_DIRECTORY_PREFIX + randomstring.generate();
 
   // Check compilebox security key
   if (secretString !== secretKey) {
+    await endGame(compileDirectory);
     return res.json({
       success: false,
       message: 'Unauthorized!',
@@ -80,32 +118,20 @@ app.post('/compile', async (req, res) => {
   }
 
   try {
-    const directoryCheckStat = await statFileAsync(`./${COMPILE_DIRECTORY}`);
-
-    // If it's not a valid directory, quit
-    if (!directoryCheckStat.isDirectory()) {
-      console.log(`Please create the ${COMPILE_DIRECTORY} directory. Aborting...`);
-      return res.json({
-        success: false,
-        error: 'Internal Server Error',
-      });
-    }
-
-    // Remove anything previously contained in the directory and create new subdirectories
+    // Create new subdirectory for this transaction
     await execChildProcessAsync(`
-      rm -rf ./${COMPILE_DIRECTORY} && \
-      mkdir -p ${COMPILE_DIRECTORY}/dlls && \
-      mkdir -p ${COMPILE_DIRECTORY}/source`);
+      mkdir -p ${compileDirectory}/dlls && \
+      mkdir -p ${compileDirectory}/source`);
 
     // Write the player code into a file to ready it for compilation
-    await writeFileAsync(`./${COMPILE_DIRECTORY}/source/player_code.cpp`, code);
+    await writeFileAsync(`${compileDirectory}/source/player_code.cpp`, code);
 
     // Launch the compile container, passing the directories as params
     // Once compile is done, the output libs are mapped back into the libs directory
     const { stdout, stderr } = await execChildProcessAsync(`
       docker run \
-      -v $(pwd)/${COMPILE_DIRECTORY}/dlls:/root/output_libs \
-      -v $(pwd)/${COMPILE_DIRECTORY}/source:${PLAYER_CODE_DIRECTORY} \
+      -v $(pwd)/${compileDirectory}/dlls:/root/output_libs \
+      -v $(pwd)/${compileDirectory}/source:${PLAYER_CODE_DIRECTORY} \
       -t ${COMPILER_IMAGE}`);
 
     // Strip ANSI special color characters in compiler output
@@ -118,6 +144,9 @@ app.post('/compile', async (req, res) => {
     // If there was an error in compilation
     if (strippedStdout.toLowerCase().indexOf('error:') !== -1
      || strippedStdout.toLowerCase().indexOf('errors') !== -1) {
+      // Strip ANSI special color characters in compiler output
+      const strippedStdout = stripAnsi(stdout);
+      await endGame(compileDirectory);
       return res.json({
         success: false,
         error: strippedStdout,
@@ -125,10 +154,11 @@ app.post('/compile', async (req, res) => {
     }
 
     // Read the output DLLs
-    const dll1 = await readFileAsync(`./${COMPILE_DIRECTORY}/dlls/libplayer_1_code.so`);
-    const dll2 = await readFileAsync(`./${COMPILE_DIRECTORY}/dlls/libplayer_2_code.so`);
+    const dll1 = await readFileAsync(`${compileDirectory}/dlls/libplayer_1_code.so`);
+    const dll2 = await readFileAsync(`${compileDirectory}/dlls/libplayer_2_code.so`);
 
     // Return response
+    await endGame(compileDirectory);
     return res.json({
       success: true,
       dll1,
@@ -137,6 +167,7 @@ app.post('/compile', async (req, res) => {
 
   // Catch all
   } catch (e) {
+    await endGame(compileDirectory);
     console.error(e);
     return e;
   }
@@ -144,11 +175,27 @@ app.post('/compile', async (req, res) => {
 
 // Execute Route
 app.post('/execute', async (req, res) => {
+  // If we're handling too many requests, stop
+  if (requestCount === maxRequests) {
+    return res.json({
+      success: false,
+      error: 'Box is busy... Please wait!',
+    });
+  }
+
+  // Increment the requestCount
+  requestCount += 1;
+
+  // Generate a new directory name for this transaction
+  const executeDirectory = EXECUTE_DIRECTORY_PREFIX + randomstring.generate();
+
+  // Read input parameters
   const { map, secretString } = req.body;
   let { dll1, dll2 } = req.body;
 
   // Check compilebox security key
   if (secretString !== secretKey) {
+    await endGame(executeDirectory);
     return res.json({
       success: false,
       message: 'Unauthorized!',
@@ -163,37 +210,24 @@ app.post('/execute', async (req, res) => {
   const key = randomstring.generate();
 
   try {
-    // Check if the container directory exists
-    const directoryCheckStat = await statFileAsync(`./${EXECUTE_DIRECTORY}`);
-
-    // If it's not a valid directory, quit
-    if (!directoryCheckStat.isDirectory()) {
-      console.log(`Please create the ${EXECUTE_DIRECTORY} directory. Aborting...`);
-      return res.json({
-        success: false,
-        error: 'Internal Server Error',
-      });
-    }
-
     // Remove anything previously contained in the directory and create new subdirectories
     await execChildProcessAsync(`
-      rm -rf ./${EXECUTE_DIRECTORY} && \
-      mkdir -p ${EXECUTE_DIRECTORY}/dlls && \
-      mkdir -p ${EXECUTE_DIRECTORY}/output_log`);
+      mkdir -p ${executeDirectory}/dlls && \
+      mkdir -p ${executeDirectory}/output_log`);
 
     // Write the player DLLs
-    await writeFileAsync(`${__dirname}/${EXECUTE_DIRECTORY}/dlls/libplayer_1_code.so`, dll1);
-    await writeFileAsync(`${__dirname}/${EXECUTE_DIRECTORY}/dlls/libplayer_2_code.so`, dll2);
+    await writeFileAsync(`${__dirname}/${executeDirectory}/dlls/libplayer_1_code.so`, dll1);
+    await writeFileAsync(`${__dirname}/${executeDirectory}/dlls/libplayer_2_code.so`, dll2);
 
     // Write the map and key files
-    await writeFileAsync(`${__dirname}/${EXECUTE_DIRECTORY}/dlls/map.txt`, map);
-    await writeFileAsync(`${__dirname}/${EXECUTE_DIRECTORY}/dlls/key.txt`, key);
+    await writeFileAsync(`${__dirname}/${executeDirectory}/dlls/map.txt`, map);
+    await writeFileAsync(`${__dirname}/${executeDirectory}/dlls/key.txt`, key);
 
     // Launch the execute container, and pass output directories as parameters
     const { stdout, stderr } = await execChildProcessAsync(`
       docker run \
-      -v $(pwd)/${EXECUTE_DIRECTORY}/dlls:/root/input_libs \
-      -v $(pwd)/${EXECUTE_DIRECTORY}/output_log:/root/output_log \
+      -v $(pwd)/${executeDirectory}/dlls:/root/input_libs \
+      -v $(pwd)/${executeDirectory}/output_log:/root/output_log \
       -t ${RUNNER_IMAGE}`);
 
     // Log output for visibility
@@ -201,6 +235,7 @@ app.post('/execute', async (req, res) => {
 
     // If there was a visible error during runtime
     if (stdout.toLowerCase().indexOf('error') !== -1) {
+      await endGame(executeDirectory);
       return res.json({
         success: false,
         error: stripAnsi(stdout),
@@ -209,6 +244,7 @@ app.post('/execute', async (req, res) => {
 
     // If some other runtime error occured
     if (stderr) {
+      await endGame(executeDirectory);
       return res.json({
         success: false,
         error: stripAnsi(stderr),
@@ -223,6 +259,7 @@ app.post('/execute', async (req, res) => {
 
     // Ensure the security key matches
     if (results.key !== key) {
+      await endGame(executeDirectory);
       return res.json({
         success: false,
         error: 'Security key mismatch! Possibly result tampering by player.',
@@ -234,6 +271,7 @@ app.post('/execute', async (req, res) => {
 
     // If the game ended with an UNDEFINED status, return blank
     if (results.indexOf('UNDEFINED') !== -1) {
+      await endGame(executeDirectory);
       return res.json({
         success: true,
         log: '',
@@ -244,17 +282,18 @@ app.post('/execute', async (req, res) => {
     }
 
     // Else, we write the game log to file, and compress
-    const log = await readFileAsync(`${EXECUTE_DIRECTORY}/output_log/game.log`);
+    const log = await readFileAsync(`${executeDirectory}/output_log/game.log`);
     const logCompressed = zlib.gzipSync(log);
 
     // Write player debug logs to file, and compress
-    const player1Log = await readFileAsync(`./${EXECUTE_DIRECTORY}/output_log/player_1.dlog`);
-    const player2Log = await readFileAsync(`./${EXECUTE_DIRECTORY}/output_log/player_2.dlog`);
+    const player1Log = await readFileAsync(`${executeDirectory}/output_log/player_1.dlog`);
+    const player2Log = await readFileAsync(`${executeDirectory}/output_log/player_2.dlog`);
     const player1LogCompressed = zlib.gzipSync(player1Log);
     const player2LogCompressed = zlib.gzipSync(player2Log);
 
     // Return response with logs and results
-    res.json({
+    await endGame(executeDirectory);
+    return res.json({
       success: true,
       log: logCompressed,
       results,
@@ -264,6 +303,7 @@ app.post('/execute', async (req, res) => {
 
   // Catch all
   } catch (e) {
+    await endGame(executeDirectory);
     console.error(e);
     return e;
   }

@@ -1,4 +1,4 @@
 node_modules/*
 config.js
-compilebox_transaction/*
-executebox_transaction/*
+compileboxes/*
+executeboxes/*
