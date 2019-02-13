@@ -45,8 +45,7 @@ const maxRequests = 2;
 // Helper function to parse results from the result line output of the simulator
 const parseResultsFromString = (resultsString) => {
 
-  const resultsItems = resultsString.split(' ');
-
+  const resultsItems = resultsString.split(' ').map(item => item.trim());
   // Destructure results string
   const [
     key,
@@ -96,6 +95,7 @@ app.post('/compile', async (req, res) => {
     return res.json({
       success: false,
       error: 'Box is busy... Please wait!',
+      errorType: 'BOX_BUSY',
     });
   }
 
@@ -113,7 +113,8 @@ app.post('/compile', async (req, res) => {
     await endGame(compileDirectory);
     return res.json({
       success: false,
-      message: 'Unauthorized!',
+      error: 'Unauthorized!',
+      errorType: 'UNAUTHORIZED',
     });
   }
 
@@ -150,6 +151,7 @@ app.post('/compile', async (req, res) => {
       return res.json({
         success: false,
         error: strippedStdout,
+        errorType: 'COMPILE_ERROR',
       });
     }
 
@@ -199,6 +201,7 @@ app.post('/execute', async (req, res) => {
     return res.json({
       success: false,
       message: 'Unauthorized!',
+      errorType: 'BOX_BUSY',
     });
   }
 
@@ -239,6 +242,7 @@ app.post('/execute', async (req, res) => {
       return res.json({
         success: false,
         error: stripAnsi(stdout),
+        errorType: 'EXECUTE_PROCESS_ERROR',
       });
     }
 
@@ -248,6 +252,7 @@ app.post('/execute', async (req, res) => {
       return res.json({
         success: false,
         error: stripAnsi(stderr),
+        errorType: 'UNKNOWN_EXECUTE_ERROR',
       });
     }
 
@@ -263,6 +268,7 @@ app.post('/execute', async (req, res) => {
       return res.json({
         success: false,
         error: 'Security key mismatch! Possibly result tampering by player.',
+        errorType: 'KEY_MISMATCH',
       });
     }
 
@@ -270,7 +276,7 @@ app.post('/execute', async (req, res) => {
     delete results.key;
 
     // If the game ended with an UNDEFINED status, return blank
-    if (results.indexOf('UNDEFINED') !== -1) {
+    if (['UNDEFINED', 'RUNTIME_ERROR'].includes(results.scores[0].status) || ['UNDEFINED', 'RUNTIME_ERROR'].includes(results.scores[1].status)) {
       await endGame(executeDirectory);
       return res.json({
         success: true,
@@ -278,6 +284,7 @@ app.post('/execute', async (req, res) => {
         results,
         player1LogCompressed: '',
         player2LogCompressed: '',
+        errorType: 'PLAYER_RUNTIME_ERROR',
       });
     }
 
