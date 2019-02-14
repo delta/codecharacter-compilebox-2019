@@ -46,11 +46,13 @@ const maxRequests = 2;
 const parseResultsFromString = (resultsString) => {
 
   const resultsItems = resultsString.split(' ').map(item => item.trim());
+
   // Destructure results string
   const [
     key,
     winner,
     winType,
+    interestingness,
     player1Score,
     player1Status,
     player2Score,
@@ -61,6 +63,7 @@ const parseResultsFromString = (resultsString) => {
     key,
     winner,
     winType,
+    interestingness,
     scores: [
       {
         score: parseInt(player1Score),
@@ -275,8 +278,10 @@ app.post('/execute', async (req, res) => {
     // If we've gotten this far, the security keys match. Remove it from results
     delete results.key;
 
-    // If the game ended with an UNDEFINED status, return blank
-    if (['UNDEFINED', 'RUNTIME_ERROR'].includes(results.scores[0].status) || ['UNDEFINED', 'RUNTIME_ERROR'].includes(results.scores[1].status)) {
+    // If the game ended with an undefined status, return blank
+    const badErrorCodes = ['UNDEFINED', 'RUNTIME_ERROR'];
+    if (badErrorCodes.includes(results.scores[0].status)
+     || badErrorCodes.includes(results.scores[1].status)) {
       await endGame(executeDirectory);
       return res.json({
         success: true,
