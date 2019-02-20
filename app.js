@@ -270,13 +270,13 @@ app.post('/execute', async (req, res) => {
 
     // Else, we write the game log to file, and compress
     const log = await readFileAsync(`${executeDirectory}/output_log/game.log`);
-    const logCompressed = zlib.gzipSync(log);
 
     // Write player debug logs to file, and compress
     const player1Log = await readFileAsync(`${executeDirectory}/output_log/player_1.dlog`);
     const player2Log = await readFileAsync(`${executeDirectory}/output_log/player_2.dlog`);
-    const player1LogCompressed = zlib.gzipSync(player1Log);
-    const player2LogCompressed = zlib.gzipSync(player2Log);
+    const player1LogCompressed = JSON.stringify(zlib.gzipSync(player1Log));
+    const player2LogCompressed = JSON.stringify(zlib.gzipSync(player2Log));
+    const logCompressed = JSON.stringify(zlib.gzipSync(log));
 
     // Return response with logs and results
     await endGame(executeDirectory);
