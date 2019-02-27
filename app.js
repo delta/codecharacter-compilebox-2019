@@ -239,16 +239,6 @@ app.post('/execute', async (req, res) => {
     // Log output for visibility
     console.log(stdout, stderr);
 
-    // If there was a visible error during runtime
-    if (stdout.toLowerCase().indexOf('error') !== -1) {
-      await endGame(executeDirectory);
-      return res.json({
-        success: false,
-        error: stripAnsi(stdout),
-        errorType: 'EXECUTE_PROCESS_ERROR',
-      });
-    }
-
     // If some other runtime error occured
     if (stderr) {
       await endGame(executeDirectory);
@@ -277,21 +267,6 @@ app.post('/execute', async (req, res) => {
 
     // If we've gotten this far, the security keys match. Remove it from results
     delete results.key;
-
-    // If the game ended with an undefined status, return blank
-    const badErrorCodes = ['UNDEFINED', 'RUNTIME_ERROR'];
-    if (badErrorCodes.includes(results.scores[0].status)
-     || badErrorCodes.includes(results.scores[1].status)) {
-      await endGame(executeDirectory);
-      return res.json({
-        success: true,
-        log: '',
-        results,
-        player1LogCompressed: '',
-        player2LogCompressed: '',
-        errorType: 'PLAYER_RUNTIME_ERROR',
-      });
-    }
 
     // Else, we write the game log to file, and compress
     const log = await readFileAsync(`${executeDirectory}/output_log/game.log`);
