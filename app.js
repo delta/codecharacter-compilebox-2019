@@ -229,12 +229,23 @@ app.post('/execute', async (req, res) => {
     await writeFileAsync(`${__dirname}/${executeDirectory}/dlls/map.txt`, map);
     await writeFileAsync(`${__dirname}/${executeDirectory}/dlls/key.txt`, key);
 
+    let stdout;
+    let stderr;
+
+    try {
     // Launch the execute container, and pass output directories as parameters
-    const { stdout, stderr } = await execChildProcessAsync(`
-      docker run \
-      -v $(pwd)/${executeDirectory}/dlls:/root/input_libs \
-      -v $(pwd)/${executeDirectory}/output_log:/root/output_log \
-      -t ${RUNNER_IMAGE}`);
+      ({ stdout, stderr } = await execChildProcessAsync(`
+        docker run  --name codecharacter-runner-${key} \
+        -v $(pwd)/${executeDirectory}/dlls:/root/input_libs \
+        -v $(pwd)/${executeDirectory}/output_log:/root/output_log \
+        -t ${RUNNER_IMAGE}`, {
+        timeout: 30000,
+      }));
+    } catch (err) {
+      execChildProcessAsync(`docker kill codecharacter-runner-${key}`);
+      stderr = '';
+      stdout = `${key} TIE TIMEOUT 0 0 TIMEOUT 0 TIMEOUT\n `;
+    }
 
     // Log output for visibility
     console.log(stdout, stderr);
