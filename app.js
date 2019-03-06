@@ -22,11 +22,15 @@ app.use(cookieParser());
 // Constants
 const COMPILE_DIRECTORY_BASE = 'compileboxes';
 const EXECUTE_DIRECTORY_BASE = 'executeboxes';
+const DEBUG_DIRECTORY_BASE = 'debugboxes';
 const COMPILE_DIRECTORY_PREFIX = `${COMPILE_DIRECTORY_BASE}/compile_`;
 const EXECUTE_DIRECTORY_PREFIX = `${EXECUTE_DIRECTORY_BASE}/execute_`;
+const DEBUG_DIRECTORY_PREFIX = `${DEBUG_DIRECTORY_BASE}/debug_`;
 const PLAYER_CODE_DIRECTORY = '/root/codecharacter/src/player_code/src';
 const COMPILER_IMAGE = 'deltanitt/codecharacter-compiler-2019:latest';
 const RUNNER_IMAGE = 'deltanitt/codecharacter-runner-2019:latest';
+const DEBUG_IMAGE = 'deltanitt/codecharacter-debugger-2019:latest';
+const DEBUG_HELP_MESSAGE = "Shown below is a stack trace at the time of error :";
 
 // Helper function to strip ANSI characters from console output
 const stripAnsi = input => input.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
@@ -82,6 +86,56 @@ const readFileAsync = util.promisify(fs.readFile);
 const writeFileAsync = util.promisify(fs.writeFile);
 const statFileAsync = util.promisify(fs.stat);
 const execChildProcessAsync = util.promisify(childProcess.exec);
+
+// Helper method to parse the output of GDB stack traces
+const parseDump = (dump) => {
+  const lines = dump.split('\n');
+  const removePatterns = [
+    /^codecharacter/,                   // Remove result line in case it exists
+    /^\[.*\]$/,                         // Remove GDB thread traces
+    /^Using host.*/,                    // Remove GDB linker traces
+    /^process \d+ is executing/,        // Remove process start trace
+    /^Running \.\/player_/,             // Remove player driver traces
+    /^Starting game.../,                // Remove main driver trace
+  ];
+
+  let stackTrace = '\n' + DEBUG_HELP_MESSAGE;
+
+  // For each line, if it matches one of the remove patterns, don't include it in output
+  for (let line of lines) {
+    let showLine = true;
+    for (let regex of removePatterns) {
+      if (regex.test(line)) {
+        showLine = false;
+        break;
+      }
+    }
+
+    if (showLine) {
+      stackTrace += (line + '\n');
+    }
+  }
+
+  // If we can find the line number of the error, add it to the top of the output
+  const stackTraceLines = stackTrace.split('\n');
+  const playerErrorLineRegex = /^(.*)at \/root\/codecharacter\/src\/player_code\/src\/player_code\.cpp\:(\d+)/;
+  let errorLineNumber = -1;
+
+  for (var line of stackTraceLines) {
+    if (playerErrorLineRegex.test(line)) {
+      let match = playerErrorLineRegex.exec(line);
+      errorLineNumber = parseInt(match[2]);
+      break;
+    }
+  }
+
+  if (errorLineNumber !== -1) {
+    let message = 'Error possibly on line number ' + errorLineNumber + '\n';
+    stackTrace = message + stackTrace;
+  }
+
+  return stackTrace.trim();
+};
 
 // Helper method to end the game and decrement the request count
 const endGame = async (transactionDirectory) => {
@@ -222,12 +276,12 @@ app.post('/execute', async (req, res) => {
       mkdir -p ${executeDirectory}/output_log`);
 
     // Write the player DLLs
-    await writeFileAsync(`${__dirname}/${executeDirectory}/dlls/libplayer_1_code.so`, dll1);
-    await writeFileAsync(`${__dirname}/${executeDirectory}/dlls/libplayer_2_code.so`, dll2);
+    await writeFileAsync(`${executeDirectory}/dlls/libplayer_1_code.so`, dll1);
+    await writeFileAsync(`${executeDirectory}/dlls/libplayer_2_code.so`, dll2);
 
     // Write the map and key files
-    await writeFileAsync(`${__dirname}/${executeDirectory}/dlls/map.txt`, map);
-    await writeFileAsync(`${__dirname}/${executeDirectory}/dlls/key.txt`, key);
+    await writeFileAsync(`${executeDirectory}/dlls/map.txt`, map);
+    await writeFileAsync(`${executeDirectory}/dlls/key.txt`, key);
 
     // Launch the execute container, and pass output directories as parameters
     const { stdout, stderr } = await execChildProcessAsync(`
@@ -291,6 +345,84 @@ app.post('/execute', async (req, res) => {
   // Catch all
   } catch (e) {
     await endGame(executeDirectory);
+    console.error(e);
+    return e;
+  }
+});
+
+// Debug-Run Route
+app.post('/debug', async (req, res) => {
+  // If we're handling too many requests, stop
+  if (requestCount === maxRequests) {
+    return res.json({
+      success: false,
+      error: 'Box is busy... Please wait!',
+      errorType: 'BOX_BUSY',
+    });
+  }
+
+  // Increment the requestCount
+  requestCount += 1;
+
+  // Read input parameters
+  const { code1, code2, map, secretString } = req.body;
+
+  // Generate a new directory name for this transaction
+  const debugDirectory = DEBUG_DIRECTORY_PREFIX + randomstring.generate();
+
+  // Hard code the security key for this run
+  const key = 'codecharacter';
+
+  // Check compilebox security key
+  if (secretString !== secretKey) {
+    await endGame(debugDirectory);
+    return res.json({
+      success: false,
+      error: 'Unauthorized!',
+      errorType: 'UNAUTHORIZED',
+    });
+  }
+
+  try {
+    // Create new subdirectory for this transaction
+    await execChildProcessAsync(`
+      mkdir -p ${debugDirectory}/dump && \
+      mkdir -p ${debugDirectory}/source`);
+
+    // Write the player code into a file to ready it for compilation
+    await writeFileAsync(`${debugDirectory}/source/player_code.cpp`, code1);
+    await writeFileAsync(`${debugDirectory}/source/player_code.cpp.2`, code2);
+
+    // Write the map and key files
+    await writeFileAsync(`${debugDirectory}/source/map.txt`, map);
+    await writeFileAsync(`${debugDirectory}/source/key.txt`, key);
+
+    // Launch the debug container, passing the directories as params
+    // Once compile and run is done, the dump is mapped back
+    const { stdout, stderr } = await execChildProcessAsync(`
+      docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined\
+      -v $(pwd)/${debugDirectory}/dump:/root/output_libs \
+      -v $(pwd)/${debugDirectory}/source:${PLAYER_CODE_DIRECTORY} \
+      -t ${DEBUG_IMAGE}`);
+
+    // Read the output dump
+    const raw_dump = await readFileAsync(`${debugDirectory}/dump/dump.out`);
+    const dump = raw_dump.toString('utf-8');
+
+    const trace = parseDump(dump);
+
+    console.log(trace);
+
+    // Return response
+    await endGame(debugDirectory);
+    return res.json({
+      success: true,
+      trace,
+    });
+
+  // Catch all
+  } catch (e) {
+    await endGame(debugDirectory);
     console.error(e);
     return e;
   }
